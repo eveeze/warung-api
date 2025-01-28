@@ -1,0 +1,24 @@
+// app.js
+
+const express = require("express");
+const cors = require("cors");
+require("dotenv").config();
+// inisialisasi routes
+const userRoutes = require("./routes/userRoutes");
+const errorHandler = require("./middlewares/errorHandler");
+// inisialisasi app express
+const app = express();
+
+// middleware
+app.use(cors());
+app.use(express.json());
+
+// error handler
+app.use(errorHandler);
+
+// routes
+app.use("/api/users", userRoutes);
+PORT = process.env.PORT;
+app.listen(PORT, () => {
+  console.log(`Server sudah berjalan di port ${PORT}`);
+});
