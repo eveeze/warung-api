@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const prisma = require("../utils/prisma");
+
 const authMiddleware = async (req, res, next) => {
   const token = req.header("Authorization")?.replace("Bearer ", "");
 
@@ -10,20 +11,13 @@ const authMiddleware = async (req, res, next) => {
   }
 
   try {
-    // Periksa apakah token sudah di-blacklist
-    const blacklistedToken = await prisma.blacklistedToken.findUnique({
-      where: { token },
-    });
-
-    if (blacklistedToken) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Token is blacklisted" });
-    }
-
     // Verifikasi token JWT
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+
+    // Cari user berdasarkan ID dari token
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+    });
 
     if (!user) {
       return res
@@ -31,10 +25,23 @@ const authMiddleware = async (req, res, next) => {
         .json({ success: false, message: "User not found" });
     }
 
+    // Tambahkan user ke object request
     req.user = user;
     next();
   } catch (err) {
-    res.status(401).json({ success: false, message: "Invalid token" });
+    // Handle error spesifik JWT
+    let message = "Invalid token";
+    if (err.name === "TokenExpiredError") {
+      message = "Token expired";
+    } else if (err.name === "JsonWebTokenError") {
+      message = "Malformed token";
+    }
+
+    res.status(401).json({
+      success: false,
+      message: message,
+    });
   }
 };
+
 module.exports = authMiddleware;

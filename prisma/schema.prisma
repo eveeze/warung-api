@@ -15,24 +15,19 @@ datasource db {
 
 
 model User {
-  id                     Int       @id @default(autoincrement())
-  phone                  String    @unique
-  email                  String    @unique
-  name                   String
-  password               String
-  isVerified             Boolean   @default(false)
-  failedLoginAttempts    Int       @default(0)
-  lockUntil              DateTime? 
-  isResetPasswordVerified Boolean   @default(false)
-  token                  String?   
-  verificationOtp        String?   
-  resetPasswordOtp       String?   
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  id                         Int       @id @default(autoincrement())
+  phone                      String    @unique
+  email                      String    @unique
+  name                       String
+  password                   String
+  isVerified                 Boolean   @default(false)
+  isResetPasswordVerified    Boolean   @default(false)
+  verificationOtp            String?   
+  verificationOtpCreatedAt   DateTime?
+  resetPasswordOtp           String?   
+  resetOtpCreatedAt          DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 }
 
-model BlacklistedToken {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique
-  createdAt DateTime @default(now())
-}
+
