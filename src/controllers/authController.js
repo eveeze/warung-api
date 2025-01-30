@@ -107,6 +107,49 @@ exports.verifyOtp = async (req, res) => {
   }
 };
 
+exports.resendOtp = async (req, res) => {
+  const { email } = req.body;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "email akun tidak ditemukan , tolong registrasi terlebih dahulu",
+      });
+    }
+
+    if (user.isVerified) {
+      return res
+        .status(400)
+        .json({ success: false, message: "user sudah verified" });
+    } else {
+      const otp = generateOTP();
+
+      await prisma.user.update({
+        where: { email },
+        data: {
+          verificationOtp: otp,
+          verificationOtpCreatedAt: new Date(),
+        },
+      });
+      await sendOtp(email, otp);
+      return res.status(200).json({
+        success: true,
+        message: "kode otp telah dikirim ulang ke email anda",
+      });
+    }
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "terjadi kesalahan saat mengirimkan ulang otp",
+    });
+  }
+};
+
 exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -166,6 +209,129 @@ exports.loginUser = async (req, res) => {
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ success: false, message: "Login failed" });
+  }
+};
+
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        message: "jika email terdaftar otp akan dikirimkan",
+      });
+    }
+
+    const otp = generateOTP();
+    await prisma.user.update({
+      where: {
+        email,
+      },
+      data: {
+        resetPasswordOtp: otp,
+        resetOtpCreatedAt: new Date(),
+        isResetPasswordVerified: false,
+      },
+    });
+    sendOtp;
+    return res.status(200).json({
+      success: true,
+      message: "otp telah dikirimkan ke email untuk verifikasi lupa password",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "terjadi kesalahan saat mengirimkan permintaan lupa password",
+    });
+  }
+};
+
+exports.verifyResetOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || !user.resetPasswordOtp) {
+      return res.status(404).json({
+        success: false,
+        message: "email tidak ditemukan atau otp tidak valid ",
+      });
+    }
+
+    if (user.resetPasswordOtp !== otp) {
+      return res.status(401).json({ success: false, message: "otp salah " });
+    }
+    const otpExpiryTime = 5 * 60 * 1000;
+    const now = new Date();
+    const otpGeneratedAt = user.resetOtpCreatedAt;
+    const timeDifference = now - otpGeneratedAt;
+
+    if (timeDifference > otpExpiryTime) {
+      return res.status(405).json({
+        success: false,
+        message: "otp sudah kadaluarsa",
+      });
+    }
+
+    await prisma.user.update({
+      where: { email },
+      data: {
+        isResetPasswordVerified: true,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "otp berhasil diverifikasi, silahkan reset password",
+    });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ success: false, message: "gagal memverifikasi otp" });
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || !user.isResetPasswordVerified) {
+      return res.status(401).json({
+        success: false,
+        message: "silahkan verifikasi otp reset password ",
+      });
+    } else {
+      const salt = 10;
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+      await prisma.user.update({
+        where: { email },
+        data: {
+          password: hashedPassword,
+          resetPasswordOtp: null,
+          resetOtpCreatedAt: null,
+          isResetPasswordVerified: false,
+        },
+      });
+
+      return res
+        .status(200)
+        .json({ success: true, message: "password berhasil diganti" });
+    }
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "terjadi kesalahan saat mengganti password ",
+    });
   }
 };
 
