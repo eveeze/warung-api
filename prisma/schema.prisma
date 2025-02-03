@@ -13,7 +13,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 model User {
   id                         Int       @id @default(autoincrement())
   phone                      String    @unique
@@ -26,6 +25,8 @@ model User {
   verificationOtpCreatedAt   DateTime?
   resetPasswordOtp           String?   
   resetOtpCreatedAt          DateTime?
+  sales                      Sale[]    // Track sales processed by this user
+  restocks                   Restock[] // Track restocks initiated by this user
   createdAt                  DateTime  @default(now())
   updatedAt                  DateTime  @updatedAt
 }
@@ -35,6 +36,127 @@ model Category {
   name String @unique
   description String?
   image String 
+  product Product[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  barcode     String?  @unique 
+  name        String
+  stock       Int
+  minStock    Int
+  price       Float
+  costPrice   Float
+  description String?
+  image       String   
+  category    Category @relation(fields: [categoryId], references: [id], onDelete : Cascade)
+  categoryId  Int
+  sales       SaleItem[]
+  restocks    RestockItem[] 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Customer {
+  id          String   @id @default(uuid())
+  name        String
+  phone       String?  @unique
+  email       String?
+  address     String?
+  debts       Debt[]   // Track debts for this customer
+  sales       Sale[]   // Track all sales for this customer
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Sale {
+  id           String    @id @default(uuid())
+  user         User      @relation(fields: [userId], references: [id]) // Link to the User (cashier)
+  userId       Int
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  customerId   String?
+  items        SaleItem[]
+  debt         Debt[]
+  totalAmount  Float
+  totalCost    Float     // Total cost price of items (for profit calculation)
+  profit       Float     // Profit for this sale (totalAmount - totalCost)
+  paymentType  PaymentType // Cash, QRIS, or Credit
+  paymentStatus PaymentStatus // Paid or Unpaid (for credit)
+  qrisData     String?   // Store QRIS transaction data (if applicable)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model SaleItem {
+  id          String  @id @default(uuid())
+  sale        Sale    @relation(fields: [saleId], references: [id])
+  saleId      String
+  product     Product @relation(fields: [productId], references: [id])
+  productId   String
+  quantity    Int
+  price       Float   // Selling price per unit
+  costPrice   Float   // Cost price per unit (for profit calculation)
+  totalPrice  Float   // Total selling price (quantity * price)
+  totalCost   Float   // Total cost price (quantity * costPrice)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+
+model Debt {
+  id          String   @id @default(uuid())
+  customer    Customer @relation(fields: [customerId], references: [id])
+  customerId  String
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  saleId      String
+  amount      Float
+  paidAmount  Float    @default(0)
+  isPaid      Boolean  @default(false)
+  dueDate     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+
+model Restock {
+  id          String       @id @default(uuid())
+  user        User         @relation(fields: [userId], references: [id])
+  userId      Int
+  items       RestockItem[] // Products to be restocked
+  totalCost   Float        // Total cost of the restock
+  status      RestockStatus // Pending, Completed
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model RestockItem {
+  id          String  @id @default(uuid())
+  restock     Restock @relation(fields: [restockId], references: [id])
+  restockId   String
+  product     Product @relation(fields: [productId], references: [id])
+  productId   String
+  quantity    Int     // Quantity to restock
+  costPrice   Float   // Cost price per unit
+  totalCost   Float   // Total cost for this item (quantity * costPrice)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum PaymentType {
+  CASH
+  QRIS
+  CREDIT
+}
+
+enum PaymentStatus {
+  PAID
+  UNPAID
+}
+
+enum RestockStatus {
+  PENDING
+  COMPLETED
 }

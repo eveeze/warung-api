@@ -61,6 +61,8 @@ exports.updateCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
     const { name, description } = req.body;
+
+    // Cari kategori yang ada
     const existingCategory = await prisma.category.findUnique({
       where: { id: parseInt(categoryId) },
     });
@@ -71,24 +73,32 @@ exports.updateCategory = async (req, res) => {
         .json({ success: false, message: "kategori tidak ditemukan" });
     }
 
-    let imageUrl = existingCategory.image; // Store the existing image URL
+    let imageUrl = existingCategory.image; // Simpan URL gambar yang sudah ada
+
+    // Jika ada file gambar baru diupload
     if (req.file) {
-      // If a new image is uploaded
-      const publicId = imageUrl
-        .split("/")
-        .slice(-2)
-        .join("/")
-        .replace(/\.[^/.]+$/, ""); // Extract public ID from URL
-      await cloudinary.uploader.destroy(publicId); // Delete the old image
-      imageUrl = req.file.path; // Set the new image URL
+      // Hapus gambar lama dari Cloudinary jika ada
+      if (imageUrl) {
+        const publicId = imageUrl
+          .split("/")
+          .slice(-2)
+          .join("/")
+          .replace(/\.[^/.]+$/, ""); // Ekstrak public ID dari URL
+        await cloudinary.uploader.destroy(publicId); // Hapus gambar lama
+      }
+      imageUrl = req.file.path; // Set URL gambar baru
     }
 
+    // Update kategori dengan data yang diberikan (hanya field yang diberikan akan diupdate)
     const updatedCategory = await prisma.category.update({
       where: { id: parseInt(categoryId) },
       data: {
-        name: name || existingCategory.name,
-        description: description || existingCategory.description,
-        image: imageUrl,
+        name: name !== undefined ? name : existingCategory.name, // Update nama jika diberikan
+        description:
+          description !== undefined
+            ? description
+            : existingCategory.description, // Update deskripsi jika diberikan
+        image: imageUrl, // Update gambar jika ada file baru diupload
       },
     });
 
@@ -118,6 +128,15 @@ exports.deleteCategory = async (req, res) => {
         success: false,
         message: "kategori yang ingin dihapus tidak ditemukan",
       });
+    }
+    let imageUrl = category.image;
+    if (imageUrl) {
+      const publicId = imageUrl
+        .split("/")
+        .slice(-2)
+        .join("/")
+        .replace(/\.[^/.]+$/, "");
+      await cloudinary.uploader.destroy(publicId);
     }
 
     await prisma.category.delete({
