@@ -14,6 +14,64 @@ const ProductSchema = z.object({
   category: z.preprocess((val) => Number(val), z.number().int()),
 });
 
+const QuerySchema = z.object({
+  page: z.preprocess((val) => {
+    if (!val) return 1;
+    const num = Number(val);
+    return isNaN(num) ? 1 : num;
+  }, z.number().int().positive()),
+
+  limit: z.preprocess((val) => {
+    if (!val) return 10;
+    const num = Number(val);
+    return isNaN(num) ? 10 : num;
+  }, z.number().int().positive()),
+
+  search: z.string().optional(),
+  searchFields: z.preprocess(
+    (val) => (Array.isArray(val) ? val : val ? [val] : undefined),
+    z.array(z.enum(["name", "barcode", "description"])).optional(),
+  ),
+
+  sortBy: z.enum(["name", "price", "stock", "createdAt"]).default("createdAt"),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
+
+  minPrice: z.preprocess((val) => {
+    if (!val) return undefined;
+    const num = Number(val);
+    return isNaN(num) ? undefined : num;
+  }, z.number().int().positive().optional()),
+
+  maxPrice: z.preprocess((val) => {
+    if (!val) return undefined;
+    const num = Number(val);
+    return isNaN(num) ? undefined : num;
+  }, z.number().int().positive().optional()),
+
+  category: z.preprocess((val) => {
+    if (!val) return undefined;
+    const num = Number(val);
+    return isNaN(num) ? undefined : num;
+  }, z.number().int().positive().optional()),
+
+  inStock: z.preprocess((val) => {
+    if (val === "true") return true;
+    if (val === "false") return false;
+    return undefined;
+  }, z.boolean().optional()),
+
+  minStock: z.preprocess((val) => {
+    if (!val) return undefined;
+    const num = Number(val);
+    return isNaN(num) ? undefined : num;
+  }, z.number().int().min(0).optional()),
+
+  maxStock: z.preprocess((val) => {
+    if (!val) return undefined;
+    const num = Number(val);
+    return isNaN(num) ? undefined : num;
+  }, z.number().int().optional()),
+});
 exports.createProduct = async (req, res) => {
   try {
     const data = ProductSchema.parse(req.body);
@@ -73,22 +131,48 @@ exports.createProduct = async (req, res) => {
 
 exports.getAllProduct = async (req, res) => {
   try {
-    const product = await prisma.product.findMany();
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: "produk kosong atau tidak ditemukan",
-      });
-    }
-    return res.status(200).json({ success: true, product });
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const [total, products] = await Promise.all([
+      prisma.product.count(),
+      prisma.product.findMany({
+        take: Number(limit),
+        skip,
+        orderBy: { createdAt: "desc" },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(total / Number(limit));
+
+    return res.status(200).json({
+      success: true,
+      data: products,
+      metadata: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages,
+        hasNextPage: Number(page) < totalPages,
+        hasPrevPage: Number(page) > 1,
+      },
+    });
   } catch (err) {
+    console.error("Get all products error:", err);
     return res.status(500).json({
       success: false,
-      message: "terjadi kesalahan saat mendapatkan produk",
+      message: "Terjadi kesalahan saat mendapatkan produk",
     });
   }
 };
-
 exports.getProductById = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -272,6 +356,147 @@ exports.updateProduct = async (req, res) => {
       success: false,
       message: "Terjadi kesalahan saat memperbarui produk",
       error: err.message,
+    });
+  }
+};
+
+exports.findProducts = async (req, res) => {
+  try {
+    // Preprocess query parameters to handle arrays
+    const queryParams = {
+      ...req.query,
+      searchFields: req.query.searchFields
+        ? Array.isArray(req.query.searchFields)
+          ? req.query.searchFields
+          : [req.query.searchFields]
+        : undefined,
+    };
+
+    const {
+      page,
+      limit,
+      search,
+      searchFields,
+      sortBy,
+      sortOrder,
+      minPrice,
+      maxPrice,
+      category,
+      inStock,
+      minStock,
+      maxStock,
+    } = QuerySchema.parse(queryParams);
+
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+
+    // Build search conditions
+    const searchConditions = [];
+
+    if (search) {
+      // Default search fields if none specified
+      const fieldsToSearch = searchFields || ["name", "barcode", "description"];
+
+      const searchQuery = fieldsToSearch.map((field) => {
+        if (field === "barcode") {
+          // Exact match for barcode
+          return { [field]: { equals: search } };
+        } else {
+          // Case-insensitive partial match for text fields
+          return { [field]: { contains: search, mode: "insensitive" } };
+        }
+      });
+
+      searchConditions.push({ OR: searchQuery });
+    }
+
+    // Build where clause
+    const where = {
+      AND: [
+        ...searchConditions,
+        // Price range
+        minPrice ? { price: { gte: minPrice } } : {},
+        maxPrice ? { price: { lte: maxPrice } } : {},
+        // Category filter
+        category ? { categoryId: category } : {},
+        // Stock status and range
+        inStock !== undefined
+          ? {
+              stock: inStock ? { gt: 0 } : { equals: 0 },
+            }
+          : {},
+        minStock !== undefined ? { stock: { gte: minStock } } : {},
+        maxStock !== undefined ? { stock: { lte: maxStock } } : {},
+      ].filter((condition) => Object.keys(condition).length > 0),
+    };
+
+    // Execute count and findMany in parallel
+    const [total, products] = await Promise.all([
+      prisma.product.count({ where }),
+      prisma.product.findMany({
+        where,
+        take: limit,
+        skip,
+        orderBy: { [sortBy]: sortOrder },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(total / limit);
+    const hasNextPage = page < totalPages;
+    const hasPrevPage = page > 1;
+
+    return res.status(200).json({
+      success: true,
+      data: products,
+      metadata: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage,
+        hasPrevPage,
+        nextPage: hasNextPage ? page + 1 : null,
+        prevPage: hasPrevPage ? page - 1 : null,
+      },
+      filters: {
+        search,
+        searchFields,
+        sortBy,
+        sortOrder,
+        minPrice,
+        maxPrice,
+        category,
+        inStock,
+        minStock,
+        maxStock,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid query parameters",
+        errors: err.errors.map((error) => ({
+          field: error.path.join("."),
+          message: error.message,
+          receivedValue: error.received,
+        })),
+      });
+    }
+
+    console.error("Product search error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan saat mencari produk",
     });
   }
 };
